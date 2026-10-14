@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
-import { BarChart3, Bot, Building2, CalendarDays, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, Plug, Settings, Sparkles, Wallet, X } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, MessageCircle, Plug, Settings, Sparkles, Wallet, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -14,6 +14,7 @@ const navigation: { href?: string; labelKey: I18nKey; icon: typeof LayoutDashboa
   { href: "/clients", labelKey: "nav.clients", icon: Building2 },
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { href: "/agents", labelKey: "nav.agents", icon: Bot },
+  { href: "/channels", labelKey: "nav.channels", icon: MessageCircle },
   { href: "/appointments", labelKey: "nav.appointments", icon: CalendarDays },
   { labelKey: "nav.integrations", icon: Plug },
   { labelKey: "nav.reports", icon: BarChart3 },
