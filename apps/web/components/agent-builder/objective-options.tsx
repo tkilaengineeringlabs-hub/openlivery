@@ -63,7 +63,7 @@ export function ObjectiveOptions({ catalog, value, onChange, config, onConfig, c
         </div>
 
         <div className="objective-config-actions">
-          <button type="button" className="button ghost" onClick={() => setEditing("")}>{t("common.cancel")}</button>
+          <button type="button" className="button ghost" onClick={() => setEditing("")}>Cancelar</button>
           <button type="submit" className="button primary">{t("builder.save")}</button>
         </div>
       </form>}
