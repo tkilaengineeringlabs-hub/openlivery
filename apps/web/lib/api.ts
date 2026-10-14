@@ -1,3 +1,7 @@
+import { groq } from "./i18n/dicts/groq";
+import { builder } from "./i18n/dicts/builder";
+import { ollama } from "./i18n/dicts/ollama";
+
 // Empty means same-origin: the app and the API are served from one domain
 // through the gateway, so requests use a relative "/api/..." path. Set
 // NEXT_PUBLIC_API_URL only when the API lives on a different origin (e.g. running
@@ -46,7 +50,24 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 }
 
 export function messageFrom(error: unknown): string {
-  return error instanceof Error ? error.message : "An unexpected error occurred";
+  const message = error instanceof Error ? error.message : "An unexpected error occurred";
+  if (message.startsWith("groq.")) {
+    const key = message.slice(5);
+    const dict = typeof document !== "undefined" && document.documentElement.lang === "es" ? groq.es : groq.en;
+    if (Object.prototype.hasOwnProperty.call(dict, key)) return dict[key as keyof typeof dict];
+  }
+  if (message.startsWith("builder.")) {
+    const key = message.slice(8);
+    const dict = typeof document !== "undefined" && document.documentElement.lang === "es" ? builder.es : builder.en;
+    const value = dict[key as keyof typeof dict];
+    if (typeof value === "string") return value;
+  }
+  if (message.startsWith("ollama.")) {
+    const key = message.slice(7);
+    const dict = typeof document !== "undefined" && document.documentElement.lang === "es" ? ollama.es : ollama.en;
+    if (Object.prototype.hasOwnProperty.call(dict, key)) return dict[key as keyof typeof dict];
+  }
+  return message;
 }
 
 // Absolute URL for API resources referenced outside fetch() (e.g. <img>/<audio>

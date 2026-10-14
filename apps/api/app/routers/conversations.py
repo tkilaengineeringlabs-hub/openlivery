@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ..database import get_db
 from ..deps import get_current_user
 from ..services.conversation_state import ConversationClosed, STATUSES, note_reply, set_mode, set_status
-from ..models import Agent, Contact, Conversation, Message, now_utc, User
+from ..models import Agent, Contact, Conversation, Message, ToolExecution, now_utc, User
 from ..schemas import (
     ConversationCreate,
     ConversationDetail,
@@ -27,6 +27,7 @@ from ..services.attachments import (
     store_attachment,
 )
 from ..services.tools import run_completion
+from ..services.tools.registry import validate_runtime_scope
 from ..services.knowledge import build_system_prompt, retrieve_knowledge
 from ..services.operator_media import store_operator_media_reply
 from ..services.providers import resolve_agent_credentials
@@ -223,6 +224,7 @@ def _ready_agent(db: Session, conversation: Conversation) -> tuple[Agent, tuple[
     if conversation.channel in {"instagram", "messenger"}:
         raise HTTPException(status_code=409, detail="Use the inbox reply action for this channel.")
     agent = conversation.agent
+    validate_runtime_scope(agent, conversation)
     if not agent.is_active:
         raise HTTPException(status_code=400, detail="This agent is inactive")
     credentials = resolve_agent_credentials(db, agent)
@@ -253,7 +255,7 @@ async def _generate_reply(
     messages = [{"role": "system", "content": build_system_prompt(agent, knowledge.text)}, *history]
     base_url, api_key = credentials
     completion = await run_completion(
-        db, agent, base_url, api_key, messages, temperature=agent.temperature, max_tokens=agent.max_tokens
+        db, agent, base_url, api_key, messages, temperature=agent.temperature, max_tokens=agent.max_tokens, conversation=conversation
     )
     note_reply(conversation)
     db.add(
@@ -480,3 +482,13 @@ async def reply_media_as_human(
         raise HTTPException(status_code=409, detail="Take control of the conversation before replying")
     await store_operator_media_reply(db, conversation, file=file, caption=caption, sender_name=user.name)
     return _conversation(db, user, conversation_id)
+
+
+@router.get("/{conversation_id}/tool-executions")
+def tool_executions(conversation_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    conversation = _conversation(db, user, conversation_id)
+    rows = db.scalars(select(ToolExecution).where(ToolExecution.conversation_id == conversation.id,
+        ToolExecution.agency_id == user.agency_id, ToolExecution.client_id == conversation.client_id)
+        .order_by(ToolExecution.created_at.desc()).limit(50)).all()
+    fields = ("id", "tool_name", "status", "arguments", "result_summary", "latency_ms", "created_at", "finished_at", "provider", "model")
+    return [{key: getattr(row, key) for key in fields} for row in reversed(rows)]

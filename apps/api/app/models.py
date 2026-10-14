@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Time, Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, LargeBinary, String, Text, UniqueConstraint
 from sqlalchemy import text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -62,6 +62,11 @@ class Client(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", server_default="UTC")
+    appointment_min_notice_minutes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    appointment_booking_days: Mapped[int] = mapped_column(Integer, default=365, server_default="365")
+    appointment_reminders: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    appointment_slot_minutes: Mapped[int] = mapped_column(Integer, default=15, server_default="15")
     name: Mapped[str] = mapped_column(String(180), index=True)
     # Codes from app.industries: the sector and the kind of business within
     # it. Both optional; they describe the business to the agent's prompt.
@@ -107,8 +112,7 @@ class Client(Base):
 
 
 class ProviderCredential(Base):
-    """One AI provider API key per agency (bring your own key). provider is
-    "openai" or "anthropic"; the base URL is resolved from the provider."""
+    """One connection per provider per agency; cloud URLs remain fixed."""
 
     __tablename__ = "provider_credentials"
     __table_args__ = (UniqueConstraint("agency_id", "provider", name="uq_provider_credentials_agency_provider"),)
@@ -117,6 +121,9 @@ class ProviderCredential(Base):
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(String(30))
     encrypted_api_key: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    base_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    default_model: Mapped[str | None] = mapped_column(String(180), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -124,9 +131,23 @@ class ProviderCredential(Base):
 class Agent(Base):
     __tablename__ = "agents"
 
+    selected_channels: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    selected_tools: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    shared_tool_ids: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    tone: Mapped[str] = mapped_column(String(30), default="", server_default="")
+    welcome_message: Mapped[str] = mapped_column(Text, default="", server_default="")
+    knowledge_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    objectives_managed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    objective_config: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    objectives: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
+    template_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    template_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    template_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    appointments_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     name: Mapped[str] = mapped_column(String(180))
     # What this agent does: its job, tasks and rules, in prose.
     instructions: Mapped[str] = mapped_column(Text, default="")
@@ -150,7 +171,7 @@ class Agent(Base):
     brief_policies: Mapped[str] = mapped_column(Text, default="", server_default="")
     brief_dos: Mapped[str] = mapped_column(Text, default="", server_default="")
     brief_donts: Mapped[str] = mapped_column(Text, default="", server_default="")
-    # AI provider ("openai" or "anthropic"); the agency's key for that provider is used.
+    # AI provider; the agency's unique connection for that provider is used.
     provider: Mapped[str] = mapped_column(String(30), default="openai", server_default="openai")
     model: Mapped[str] = mapped_column(String(180), default="")
     # IANA timezone (e.g. "America/Bogota"); injected into the system prompt so
@@ -438,6 +459,8 @@ class Conversation(Base):
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
     agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
+    lead_profile: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    lead_temperature: Mapped[str | None] = mapped_column(String(20), nullable=True)
     title: Mapped[str] = mapped_column(String(240), default="New conversation")
     mode: Mapped[str] = mapped_column(String(30), default="ai")
     channel: Mapped[str] = mapped_column(String(40), default="playground")
@@ -911,3 +934,191 @@ class SocialHistoryImport(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class Automation(Base):
+    __tablename__ = "automations"
+    __table_args__ = (UniqueConstraint("agent_id", "objective_id", "rule_key", name="uq_managed_objective_rule"),)
+    managed_by: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), nullable=True, index=True)
+    objective_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    rule_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    template_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    trigger_type: Mapped[str] = mapped_column(String(40))
+    trigger_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    conditions: Mapped[list] = mapped_column(JSON, default=list)
+    actions: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class AutomationRun(Base):
+    __tablename__ = "automation_runs"
+    __table_args__ = (UniqueConstraint("automation_id", "event_key", name="uq_automation_event"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    automation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("automations.id", ondelete="CASCADE"), index=True)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    event_key: Mapped[str] = mapped_column(String(180))
+    event_type: Mapped[str] = mapped_column(String(40))
+    event_payload: Mapped[dict] = mapped_column(JSON)
+    actions: Mapped[list] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    actions_executed: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ScheduledAutomationAction(Base):
+    __tablename__ = "scheduled_automation_actions"
+    __table_args__ = (
+        UniqueConstraint("automation_run_id", "action_index", name="uq_automation_run_action"),
+        Index("ix_automation_actions_due", "status", "execute_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    automation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("automations.id", ondelete="CASCADE"), index=True)
+    automation_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("automation_runs.id", ondelete="CASCADE"), index=True)
+    action_index: Mapped[int] = mapped_column(Integer)
+    action: Mapped[dict] = mapped_column(JSON)
+    execute_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppointmentService(Base):
+    __tablename__ = "appointment_services"
+    __table_args__ = (CheckConstraint("duration_minutes > 0 AND buffer_before_minutes >= 0 AND buffer_after_minutes >= 0", name="ck_appointment_service_duration"),)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    description: Mapped[str] = mapped_column(Text, default="")
+    price: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    duration_minutes: Mapped[int] = mapped_column(Integer)
+    buffer_before_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    buffer_after_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class AvailabilityRule(Base):
+    __tablename__ = "availability_rules"
+    __table_args__ = (CheckConstraint("weekday BETWEEN 0 AND 6 AND end_time > start_time", name="ck_availability_interval"),)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    weekday: Mapped[int] = mapped_column(Integer)
+    start_time: Mapped[time] = mapped_column(Time)
+    end_time: Mapped[time] = mapped_column(Time)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class AppointmentBlock(Base):
+    __tablename__ = "appointment_blocks"
+    __table_args__ = (CheckConstraint("ends_at > starts_at", name="ck_appointment_block_interval"),)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class Appointment(Base):
+    __tablename__ = "appointments"
+    __table_args__ = (
+        CheckConstraint("ends_at > starts_at AND reserved_starts_at <= starts_at AND reserved_ends_at >= ends_at", name="ck_appointment_interval"),
+        CheckConstraint("status IN ('scheduled','confirmed','completed','cancelled','no_show')", name="ck_appointment_status"),
+        Index("ix_appointments_calendar", "agency_id", "client_id", "starts_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+    service_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("appointment_services.id", ondelete="SET NULL"), nullable=True)
+    service_name: Mapped[str] = mapped_column(String(180))
+    customer_name: Mapped[str] = mapped_column(String(180))
+    customer_phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    customer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reserved_starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reserved_ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    timezone: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="scheduled")
+    source: Mapped[str] = mapped_column(String(20), default="manual")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    external_provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    external_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_calendar_id: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    calendar_sync_status: Mapped[str] = mapped_column(String(20), default="not_connected", server_default="not_connected")
+    calendar_sync_error: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    calendar_sync_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    calendar_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    calendar_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppointmentCalendar(Base):
+    __tablename__ = "appointment_calendars"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), unique=True)
+    encrypted_tokens: Mapped[str | None] = mapped_column(Text, nullable=True)
+    account_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    calendar_id: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    calendar_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class AppointmentCalendarOAuth(Base):
+    __tablename__ = "appointment_calendar_oauth"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"))
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    encrypted_verifier: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ToolExecution(Base):
+    """Durable scoped execution record; arbitrary payloads and secrets are omitted."""
+    __tablename__ = "tool_executions"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=new_uuid)
+    agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str] = mapped_column(String(180))
+    channel: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    tool_name: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20))
+    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    result_summary: Mapped[str] = mapped_column(Text, default="")
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

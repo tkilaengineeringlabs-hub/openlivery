@@ -1,4 +1,5 @@
 import uuid
+import logging
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
@@ -79,6 +80,13 @@ def create_client(payload: ClientCreate, db: Session = Depends(get_db), user: Us
         **payload.model_dump(),
     )
     db.add(client)
+    db.flush()
+    from ..services.automations import emit_event
+    try:
+        with db.begin_nested():
+            emit_event(db, "client_created", agency_id=user.agency_id, client_id=client.id)
+    except Exception:
+        logging.getLogger(__name__).warning("Client automation event failed for %s", client.id)
     db.commit()
     return _client(db, user, client.id)
 

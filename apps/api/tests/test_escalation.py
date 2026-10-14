@@ -43,7 +43,7 @@ def _inbound(client: TestClient, channel_id: str, text: str, message_id: str = "
 
 
 def _escalating_completion(call_args: dict, farewell: str, captured: dict | None = None):
-    async def fake(db, agent, base_url, api_key, messages, temperature=None, max_tokens=None, extra_specs=None):
+    async def fake(db, agent, base_url, api_key, messages, temperature=None, max_tokens=None, extra_specs=None, conversation=None):
         if captured is not None:
             captured["system"] = messages[0]["content"]
             captured["extra_specs"] = extra_specs
@@ -121,14 +121,14 @@ def test_business_rule_routes_to_its_own_destination(authenticated_client: TestC
     assert soporte
 
 
-def test_without_anywhere_to_land_the_tool_is_not_offered(authenticated_client: TestClient, monkeypatch):
+def test_without_a_team_the_tool_is_offered_for_unassigned_handoff(authenticated_client: TestClient, monkeypatch):
     client = authenticated_client
     customer, slug, members, agent, channel = _setup(client, "SinEquipos Co", ["Ana"])
 
     monkeypatch.setattr(whatsapp_service, "bridge_command", AsyncMock(return_value={}))
     captured: dict = {}
 
-    async def fake(db, agent_row, base_url, api_key, messages, temperature=None, max_tokens=None, extra_specs=None):
+    async def fake(db, agent_row, base_url, api_key, messages, temperature=None, max_tokens=None, extra_specs=None, conversation=None):
         captured["extra_specs"] = extra_specs
         captured["system"] = messages[0]["content"]
         return ai_service.Completion(text="Con gusto te ayudo.", input_tokens=1, output_tokens=1)
@@ -136,8 +136,8 @@ def test_without_anywhere_to_land_the_tool_is_not_offered(authenticated_client: 
     monkeypatch.setattr(whatsapp_inbound_service, "run_completion", fake)
     body = _inbound(client, channel["id"], "hola").json()
     assert body["mode"] == "ai"
-    assert captured["extra_specs"] is None
-    assert "ESCALAMIENTO" not in captured["system"]
+    assert captured["extra_specs"] is not None
+    assert "ESCALAMIENTO" in captured["system"]
 
 
 def test_handler_forgives_a_bogus_rule_number_when_the_trigger_is_valid():
@@ -170,7 +170,7 @@ def test_builtin_triggers_can_be_switched_off(authenticated_client: TestClient, 
     monkeypatch.setattr(whatsapp_service, "bridge_command", AsyncMock(return_value={}))
     captured: dict = {}
 
-    async def fake(db, agent_row, base_url, api_key, messages, temperature=None, max_tokens=None, extra_specs=None):
+    async def fake(db, agent_row, base_url, api_key, messages, temperature=None, max_tokens=None, extra_specs=None, conversation=None):
         captured["extra_specs"] = extra_specs
         captured["system"] = messages[0]["content"]
         return ai_service.Completion(text="Con gusto te ayudo.", input_tokens=1, output_tokens=1)

@@ -1,0 +1,83 @@
+# Isolated verification only. Never merge with docker-compose.yml.
+name: tkila-verify
+services:
+  db-test:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: tkila_test
+      POSTGRES_PASSWORD: disposable-test-only
+      POSTGRES_DB: tkila_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [verification]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tkila_test -d tkila_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api-test:
+    build:
+      context: ./apps/api
+    environment:
+      TEST_DATABASE_URL: postgresql+psycopg://tkila_test:disposable-test-only@db-test:5432/tkila_test
+      TKILA_TEST_ALLOW_RESET: "1"
+    command: ["python", "-m", "pytest", "-q"]
+    networks: [verification]
+    depends_on:
+      db-test:
+        condition: service_healthy
+  db-preview:
+    profiles: [preview]
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: tkila_preview
+      POSTGRES_PASSWORD: disposable-preview-only
+      POSTGRES_DB: tkila_preview
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [verification]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tkila_preview -d tkila_preview"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api-preview:
+    profiles: [preview]
+    volumes:
+      - ./apps/api/app:/app/backend/app:ro
+      - ./apps/api/migrations:/app/backend/migrations:ro
+    build:
+      context: ./apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://tkila_preview:disposable-preview-only@db-preview:5432/tkila_preview
+      SOCIAL_WORKER_ENABLED: "false"
+      AUTOMATION_WORKER_ENABLED: "false"
+      CALENDAR_WORKER_ENABLED: "false"
+      AUTO_RESOLVE_AFTER_HOURS: "0"
+      PUSH_PROVIDER: none
+      FRONTEND_URL: http://localhost:13000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    networks: [verification]
+    depends_on:
+      db-preview:
+        condition: service_healthy
+  preview-gateway:
+    profiles: [preview]
+    image: caddy:2-alpine
+    tmpfs: ["/data", "/config"]
+    command: ["caddy", "reverse-proxy", "--from", ":8000", "--to", "api-preview:8000"]
+    ports:
+      - "127.0.0.1:18000:8000"
+    networks: [verification, preview-edge]
+    depends_on:
+      api-preview:
+        condition: service_healthy
+networks:
+  preview-edge:
+  verification:
+    internal: true

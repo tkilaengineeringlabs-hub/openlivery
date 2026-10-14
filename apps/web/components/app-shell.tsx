@@ -3,21 +3,20 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
-import { Bot, Building2, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, MessageSquareText, Radio, Settings, Sparkles, Wallet, X } from "lucide-react";
+import { BarChart3, Bot, Building2, CalendarDays, CreditCard, Inbox, LayoutDashboard, LogOut, Menu, Plug, Settings, Sparkles, Wallet, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useT, type I18nKey } from "@/lib/i18n";
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { DiscordIcon } from "@/components/discord-icon";
-import { DISCORD_INVITE_URL } from "@/lib/community";
 import type { User } from "@/types";
 
-const navigation: { href: string; labelKey: I18nKey; icon: typeof LayoutDashboard }[] = [
+const navigation: { href?: string; labelKey: I18nKey; icon: typeof LayoutDashboard }[] = [
   { href: "/", labelKey: "nav.home", icon: LayoutDashboard },
   { href: "/clients", labelKey: "nav.clients", icon: Building2 },
-  { href: "/agents", labelKey: "nav.agents", icon: Bot },
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
-  { href: "/playground", labelKey: "nav.playground", icon: MessageSquareText },
-  { href: "/channels", labelKey: "nav.channels", icon: Radio },
+  { href: "/agents", labelKey: "nav.agents", icon: Bot },
+  { href: "/appointments", labelKey: "nav.appointments", icon: CalendarDays },
+  { labelKey: "nav.integrations", icon: Plug },
+  { labelKey: "nav.reports", icon: BarChart3 },
   { href: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
@@ -96,13 +95,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen && <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="brand-row">
-          <Link href="/" className="brand"><span className="openlivery-icon"><img src="/brand/openlivery-logo-original.png" alt="" /></span><span>OpenLivery</span></Link>
+          <Link href="/" className="brand"><span className="openlivery-icon"><img src="/brand/openlivery-logo-original.png" alt="" /></span><span>Tkila Box</span></Link>
           <button className="sidebar-close" onClick={() => setMobileOpen(false)} aria-label={t("shell.closeMenu")}><X /></button>
         </div>
         <div className="sidebar-workspace"><Building2 size={14} /><span>{user.agency.name}</span></div>
         <nav>
           <span className="nav-label">{t("nav.section")}</span>
           {navigation.map((item) => {
+            if (!item.href) return <span key={item.labelKey} className="nav-pending" aria-disabled="true"><item.icon size={18} /><span>{t(item.labelKey)}</span><small>{t("nav.comingSoon")}</small></span>;
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return <Link key={item.href} href={item.href} className={active ? "active" : ""} onClick={() => setMobileOpen(false)}><item.icon size={18} /><span>{t(item.labelKey)}</span></Link>;
           })}
@@ -113,16 +113,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="sidebar-bottom">
-          <a
-            href={DISCORD_INVITE_URL}
-            className="sidebar-community"
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setMobileOpen(false)}
-          >
-            <DiscordIcon size={18} />
-            <span>{t("shell.joinCommunity")}</span>
-          </a>
           <div className="sidebar-foot">
             <div className="user-avatar">{user.name.slice(0, 1).toUpperCase()}</div>
             <div className="user-meta"><strong>{user.name}</strong><span>{user.email}</span></div>

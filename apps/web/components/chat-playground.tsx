@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { providerLabel } from "@/lib/providers";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, FileText, ImageIcon, LoaderCircle, MessageSquarePlus, Send, Sparkles, Trash2, TriangleAlert, UserRound, Wrench } from "lucide-react";
 import { api, apiUrl, messageFrom } from "@/lib/api";
@@ -11,7 +12,7 @@ import { ListRowsSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
 import { formatTime } from "@/lib/datetime";
 import { useLanguage, useT } from "@/lib/i18n";
-import type { Agent, Attachment, Client, Conversation, Provider } from "@/types";
+import type { ToolExecution, Agent, Attachment, Client, Conversation, Provider } from "@/types";
 
 export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
   const t = useT();
@@ -23,6 +24,9 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
   const [agentId, setAgentId] = useState(lockedAgentId || "");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [showActivity, setShowActivity] = useState(false);
+  const [activity, setActivity] = useState<ToolExecution[]>([]);
+  const [toolsSupported, setToolsSupported] = useState<boolean | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,6 +55,24 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
 
   const availableAgents = useMemo(() => agents.filter((agent) => agent.client_id === clientId), [agents, clientId]);
   const selectedAgent = agents.find((agent) => agent.id === agentId);
+  useEffect(() => {
+    let active = true;
+    setToolsSupported(null);
+    if (selectedAgent && ["groq", "ollama"].includes(selectedAgent.provider)) {
+      api<{ tools: boolean | null }>(`/providers/${selectedAgent.provider}/capabilities?model=${encodeURIComponent(selectedAgent.model)}`)
+        .then(result => { if (active) setToolsSupported(result.tools === true); }).catch(() => { if (active) setToolsSupported(false); });
+    }
+    return () => { active = false; };
+  }, [selectedAgent]);
+  useEffect(() => {
+    if (!showActivity || !conversation?.id) return;
+    let active = true;
+    const refresh = () => api<ToolExecution[]>(`/conversations/${conversation.id}/tool-executions`)
+      .then(rows => { if (active) setActivity(rows); }).catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [showActivity, conversation?.id]);
   const needsKey = Boolean(selectedAgent) && !providers.find((item) => item.provider === selectedAgent!.provider)?.configured;
   const needsModel = Boolean(selectedAgent) && !selectedAgent!.model.trim();
   const agentReady = Boolean(selectedAgent) && !needsKey && !needsModel;
@@ -136,7 +158,10 @@ export function ChatPlayground({ lockedAgentId }: { lockedAgentId?: string }) {
     </aside>
     <section className="chat-panel drop-target" {...dropProps}>
       {overlay}
-      <header className="chat-head">{selectedAgent ? <><span className="agent-avatar"><Bot size={18} /></span><div><strong>{selectedAgent.name}</strong><small><i className={selectedAgent.model ? "online" : "offline"} />{selectedAgent.model ? t("playground.chat.modelConfigured") : t("playground.chat.noModelConfigured")}</small></div></> : <div><strong>{t("playground.chat.fallbackTitle")}</strong><small>{t("playground.chat.fallbackSubtitle")}</small></div>}{conversation && <span className="chat-head-actions"><span className={`mode-label ${conversation.mode}`}>{conversation.mode === "human" ? t("playground.chat.modeHuman") : t("playground.chat.modeAi")}</span>{conversation.channel === "playground" && <button type="button" className="icon-button" onClick={() => setDeleting(conversation)} disabled={busy} title={t("playground.conversations.delete")} aria-label={t("playground.conversations.delete")}><Trash2 size={16} /></button>}</span>}</header>
+      <header className="chat-head">{selectedAgent ? <><span className="agent-avatar"><Bot size={18} /></span><div><strong>{selectedAgent.name}</strong><small><i className={selectedAgent.model ? "online" : "offline"} />{selectedAgent.model ? `${providerLabel(selectedAgent.provider)} · ${selectedAgent.model}` : t("playground.chat.noModelConfigured")}</small></div></> : <div><strong>{t("playground.chat.fallbackTitle")}</strong><small>{t("playground.chat.fallbackSubtitle")}</small></div>}{conversation && <span className="chat-head-actions"><span className={`mode-label ${conversation.mode}`}>{conversation.mode === "human" ? t("playground.chat.modeHuman") : t("playground.chat.modeAi")}</span>{conversation.channel === "playground" && <button type="button" className="icon-button" onClick={() => setDeleting(conversation)} disabled={busy} title={t("playground.conversations.delete")} aria-label={t("playground.conversations.delete")}><Trash2 size={16} /></button>}</span>}</header>
+      {toolsSupported === false && <Alert type="info">{t("playground.activity.unsupported")} {t("playground.activity.limited")}</Alert>}
+      <label><input type="checkbox" checked={showActivity} onChange={event => { setShowActivity(event.target.checked); setActivity([]); }} /> {t("playground.activity.show")}</label>
+      {showActivity && <div className="sources" aria-live="polite">{activity.map(item => <span key={item.id}><strong>{item.tool_name}</strong> · {t(item.status === "started" ? "playground.activity.running" : item.status === "succeeded" ? "playground.activity.success" : "playground.activity.failed")} · {item.result_summary} · {item.latency_ms} ms</span>)}</div>}
       <div className="messages">
         {!loaded ? <ListRowsSkeleton rows={4} /> : !agentId ? <EmptyState icon={<Bot />} title={t("playground.empty.title")} description={t("playground.empty.description")} /> : !conversation?.messages?.length ? <div className="chat-welcome"><span><Sparkles size={24} /></span><h3>{t("playground.welcome.title", { name: selectedAgent?.name || "" })}</h3><p>{t("playground.welcome.description")}</p></div> : conversation.messages.filter((message) => message.kind !== "activity").map((message) => <div className={`message-row ${message.role}`} key={message.id}><span className="message-avatar">{message.role === "assistant" ? <Bot size={17} /> : <UserRound size={17} />}</span><div className="message-body"><small>{message.sender_name || (message.role === "assistant" ? selectedAgent?.name : t("playground.message.you"))}</small><MessageAttachments attachments={message.attachments} urlFor={attachmentUrl} gallery={gallery} stamp={formatTime(message.created_at, lang)} />{message.content && <div className="bubble"><RichText text={message.content} /><time className="msg-time">{formatTime(message.created_at, lang)}</time></div>}{message.sources?.length > 0 && <div className="sources"><strong><FileText size={13} /> {t("playground.message.sourcesUsed")}</strong>{message.sources.map((source) => <span key={source.id} title={source.excerpt}>{source.filename}</span>)}</div>}{(message.tool_calls?.length ?? 0) > 0 && <div className="sources"><strong><Wrench size={13} /> {t("tools.usedInReply")}</strong>{message.tool_calls!.map((call, index) => <span key={index} className={call.is_error ? "tool-error" : ""} title={call.result_preview}>{call.name}</span>)}</div>}{message.tool_calls?.some((call) => call.is_error) && <div className="tool-error-details">{message.tool_calls!.filter((call) => call.is_error).map((call, index) => <small key={index}><TriangleAlert size={12} /> <strong>{call.name}</strong> {call.result_preview}</small>)}</div>}</div></div>)}
         {busy && <div className="message-row assistant"><span className="message-avatar"><Bot size={17} /></span><div className="thinking"><i /><i /><i /></div></div>}

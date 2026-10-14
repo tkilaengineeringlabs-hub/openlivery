@@ -72,7 +72,7 @@ def escalation_enabled(db: Session, agent: Agent, rules: list[EscalationRule]) -
         return False
     if agent.escalation_team_id or agent.escalation_assignee_id:
         return True
-    return db.scalar(select(Team.id).where(Team.client_id == agent.client_id).limit(1)) is not None
+    return True
 
 
 def escalation_prompt(rules: list[EscalationRule], *, builtin_enabled: bool = True) -> str:
@@ -154,6 +154,7 @@ def build_escalation_spec(
         description=description,
         input_schema={"type": "object", "properties": properties},
         handler=handler,
+        permission_source="escalation_configuration",
     )
 
 
@@ -172,26 +173,26 @@ def resolve_destination(
     if request.rule is not None:
         if request.rule.assignee_id:
             person = db.get(PortalUser, request.rule.assignee_id)
-            if person and person.is_active:
+            if person and person.is_active and person.client_id == agent.client_id:
                 return None, person
         if request.rule.team_id:
             team = db.get(Team, request.rule.team_id)
-            if team:
+            if team and team.client_id == agent.client_id:
                 return team, None
     if request.trigger is not None or request.rule is not None:
         if agent.escalation_assignee_id:
             person = db.get(PortalUser, agent.escalation_assignee_id)
-            if person and person.is_active:
+            if person and person.is_active and person.client_id == agent.client_id:
                 return None, person
         if agent.escalation_team_id:
             team = db.get(Team, agent.escalation_team_id)
-            if team:
+            if team and team.client_id == agent.client_id:
                 return team, None
         team = _channel_team(db, agent, conversation.channel)
-        if team:
+        if team and team.client_id == agent.client_id:
             return team, None
         team = db.scalar(select(Team).where(Team.client_id == agent.client_id, Team.is_default.is_(True)))
-        if team:
+        if team and team.client_id == agent.client_id:
             return team, None
     return None, None
 

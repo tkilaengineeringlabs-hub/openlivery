@@ -119,6 +119,14 @@ export default function InboxPage() {
   }, [closeGoneThread]);
 
   useEffect(() => { loadFirst(); }, [loadFirst]);
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("conversation");
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return;
+    let live = true;
+    api<Conversation>(`/conversations/${id}`).then(row => { if (live) setSelected(row); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
 
   // Live refresh of the first page and the open thread (skipped once the user scrolls into older pages).
   useEffect(() => {
@@ -246,7 +254,7 @@ export default function InboxPage() {
               </button>
             ))}
             {loadingMore && <div className="no-conversations"><LoaderCircle className="spin" size={15} /></div>}
-          </> : <div className="no-conversations">{t("inbox.empty")}</div>}
+          </> : <div className="no-conversations"><strong>{t("inbox.empty")}</strong><p>{t("inbox.emptyHint")}</p></div>}
       </aside>
 
       <section className="inbox-thread drop-target" {...dropProps}>

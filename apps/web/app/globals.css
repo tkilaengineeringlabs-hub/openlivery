@@ -1213,7 +1213,7 @@ textarea { line-height: 1.55; }
   .wa-actions .button { width: 100%; }
 }
 
-/* Identidad OpenLivery: azul institucional, verde como acento y superficies neutras. */
+/* Base identity: institutional blue, green accents and neutral surfaces. */
 :root {
   --ink: #102a43;
   --muted: #5f6f7f;
@@ -1750,3 +1750,40 @@ p .msg-time, .bubble .msg-time { float: none; position: absolute; right: 11px; b
 
 .social-history-status { display: grid; gap: 6px; margin: 16px 0; font-size: 13px; }
 .social-history-status small { color: #687082; }
+
+/* Tkila Box dashboard identity; public portals retain their own branding. */
+.app-layout {
+  --ink: #0F2942;
+  --muted: #64748B;
+  --line: #DCE4EC;
+  --canvas: #F7F9FC;
+  --navy: #0F2942;
+  --purple: #0F2942;
+  --purple-dark: #0F2942;
+  --purple-soft: #F2FFD8;
+  --green: #8BE800;
+  --green-soft: #F2FFD8;
+  color: var(--ink);
+  background: var(--canvas);
+}
+.app-layout .sidebar { background: #FFFFFF; border-color: var(--line); overflow-y: auto; }
+.app-layout .brand, .app-layout .eyebrow { color: var(--navy); }
+.app-layout .sidebar-workspace { color: var(--muted); border-color: var(--line); background: var(--canvas); flex-shrink: 0; }
+.app-layout .sidebar nav a.active { color: var(--navy); background: var(--green-soft); box-shadow: inset 3px 0 var(--green); }
+.app-layout .sidebar nav a.active svg { color: var(--navy); }
+.sidebar nav .nav-pending { min-height: 54px; padding: 6px 10px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; column-gap: 11px; color: var(--muted); font-size: 14px; }
+.sidebar nav .nav-pending svg { flex-shrink: 0; }
+.sidebar nav .nav-pending small { grid-column: 2; font-size: 12px; line-height: 16px; }
+.app-layout .user-avatar, .app-layout .agent-avatar, .app-layout .entity-avatar,
+.app-layout .metric-icon.blue, .app-layout .metric-icon.violet, .app-layout .metric-icon.green, .app-layout .metric-icon.amber {
+  color: var(--navy); background: var(--green-soft); border-color: var(--line);
+}
+.app-layout .button.primary { color: var(--navy); background: var(--green); border-color: var(--green); box-shadow: none; }
+.app-layout .button.primary:hover:not(:disabled) { background: #7DD000; border-color: #7DD000; }
+.app-layout .button.secondary { color: var(--navy); background: #FFFFFF; border-color: var(--line); }
+.app-layout .text-link, .app-layout .table-link, .app-layout .text-button { color: var(--navy); }
+.app-layout .next-steps li > span { color: var(--navy); background: #FFFFFF; border-color: var(--line); flex-shrink: 0; }
+.app-layout .next-steps li.done > span { color: var(--navy); background: var(--green); border-color: var(--green); }
+.app-layout .trend-bar, .app-layout .usage-fill { background: var(--green); }
+.app-layout .inline-empty span { max-width: 440px; line-height: 1.5; }
+.app-layout .no-conversations p { color: var(--muted); line-height: 1.5; }

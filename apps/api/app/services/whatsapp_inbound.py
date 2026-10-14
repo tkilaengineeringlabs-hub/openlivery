@@ -26,6 +26,7 @@ from .media import audio_filename, describe_image, transcribe_audio
 from .notifications import notify_needs_human
 from .providers import resolve_agent_credentials, resolve_provider_credentials
 from .tools import run_completion
+from .tools.registry import validate_runtime_scope
 from .usage import record_usage
 from .escalation import (
     active_rules as escalation_active_rules,
@@ -343,6 +344,10 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
     text on the synchronous path, or the whole visitor burst when debounced.
     """
     agent = channel.agent
+    try:
+        validate_runtime_scope(agent, conversation)
+    except HTTPException:
+        return InboundResult(accepted=True, conversation_id=conversation.id, mode=conversation.mode)
     db.refresh(conversation)
     if conversation.mode == "human" or conversation.status == "resolved" or not channel.is_enabled:
         return InboundResult(accepted=True, conversation_id=conversation.id, mode=conversation.mode)
@@ -408,6 +413,7 @@ async def _reply_with_ai(db: Session, channel, conversation: Conversation, retri
             temperature=agent.temperature,
             max_tokens=agent.max_tokens,
             extra_specs=escalation_specs,
+            conversation=conversation,
         )
     except Exception as exc:
         channel.last_error = ("Message received, but the agent could not reply. A person must continue this conversation."

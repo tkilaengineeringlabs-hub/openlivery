@@ -1,7 +1,15 @@
 import uuid
 from datetime import date, datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+
+
+from .services.agent_catalog.objectives import validate_objectives
+from .services.agent_catalog.templates import validate_template_id
+
+AgentObjectives = Annotated[list[str], Field(max_length=20), AfterValidator(validate_objectives)]
+AgentTemplateId = Annotated[str | None, Field(max_length=80), AfterValidator(validate_template_id)]
 
 
 class ORMModel(BaseModel):
@@ -75,6 +83,8 @@ class AgentSummary(ORMModel):
 
 
 class ClientOut(ORMModel):
+    timezone: str
+    appointment_slot_minutes: int
     id: uuid.UUID
     name: str
     industry: str
@@ -144,7 +154,14 @@ class ClientDomainOut(BaseModel):
 
 
 class ProviderKeyUpdate(BaseModel):
-    api_key: str = Field(min_length=1)
+    api_key: str | None = Field(default=None, max_length=4096)
+    name: str = Field(default="Ollama local", min_length=1, max_length=180)
+    base_url: str | None = Field(default=None, max_length=2048)
+    default_model: str | None = Field(default=None, max_length=180)
+
+
+class ProviderModelTest(BaseModel):
+    model: str = Field(min_length=1, max_length=180)
 
 
 class ProviderOut(BaseModel):
@@ -152,6 +169,9 @@ class ProviderOut(BaseModel):
     label: str
     configured: bool
     api_key_masked: str = ""
+    name: str | None = None
+    base_url: str | None = None
+    default_model: str | None = None
 
 
 # Upper bound of the reply delay sliders, in seconds.
@@ -165,6 +185,16 @@ def check_reply_delay(minimum: int, maximum: int) -> None:
 
 
 class AgentBase(BaseModel):
+    selected_channels: list[str] = Field(default_factory=list, max_length=4)
+    selected_tools: list[str] = Field(default_factory=list, max_length=6)
+    shared_tool_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
+    tone: str = Field(default="", max_length=30)
+    welcome_message: str = Field(default="", max_length=2000)
+    knowledge_enabled: bool = True
+    objective_config: dict[str, dict] = Field(default_factory=dict)
+    objectives: AgentObjectives = Field(default_factory=list)
+    template_id: AgentTemplateId = None
+    appointments_enabled: bool = False
     client_id: uuid.UUID
     name: str = Field(min_length=1, max_length=180)
     instructions: str = ""
@@ -176,7 +206,7 @@ class AgentBase(BaseModel):
     brief_dos: str = ""
     brief_donts: str = ""
     model: str = ""
-    provider: str = Field(default="openai", pattern=r"^(openai|anthropic)$")
+    provider: str = Field(default="openai", pattern=r"^(openai|anthropic|ollama|groq)$")
     timezone: str = Field(default="UTC", max_length=64)
     prompt_language: str = Field(default="es", pattern=r"^(en|es)$")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
@@ -197,10 +227,23 @@ class AgentBase(BaseModel):
 
 
 class AgentCreate(AgentBase):
-    pass
+    apply_builder: bool = False
+    apply_template: bool = False
 
 
 class AgentUpdate(BaseModel):
+    apply_builder: bool = False
+    apply_template: bool = False
+    selected_channels: list[str] = Field(default_factory=list, max_length=4)
+    selected_tools: list[str] = Field(default_factory=list, max_length=6)
+    shared_tool_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
+    tone: str = Field(default="", max_length=30)
+    welcome_message: str = Field(default="", max_length=2000)
+    knowledge_enabled: bool = True
+    objective_config: dict[str, dict] = Field(default_factory=dict)
+    objectives: AgentObjectives = Field(default_factory=list)
+    template_id: AgentTemplateId = None
+    appointments_enabled: bool | None = None
     client_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=180)
     instructions: str | None = None
@@ -212,7 +255,7 @@ class AgentUpdate(BaseModel):
     brief_dos: str | None = None
     brief_donts: str | None = None
     model: str | None = None
-    provider: str | None = Field(default=None, pattern=r"^(openai|anthropic)$")
+    provider: str | None = Field(default=None, pattern=r"^(openai|anthropic|ollama|groq)$")
     timezone: str | None = Field(default=None, max_length=64)
     prompt_language: str | None = Field(default=None, pattern=r"^(en|es)$")
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
@@ -228,6 +271,23 @@ class AgentUpdate(BaseModel):
 
 
 class AgentOut(ORMModel):
+    escalation_builtin_enabled: bool = True
+    channel_types: list[str] = Field(default_factory=list)
+    custom_tool_names: list[str] = Field(default_factory=list)
+    selected_channels: list[str] = Field(default_factory=list, max_length=4)
+    selected_tools: list[str] = Field(default_factory=list, max_length=6)
+    shared_tool_ids: list[uuid.UUID] = Field(default_factory=list, max_length=30)
+    tone: str = Field(default="", max_length=30)
+    welcome_message: str = Field(default="", max_length=2000)
+    knowledge_enabled: bool = True
+    objectives_managed: bool = False
+    objective_config: dict[str, dict] = Field(default_factory=dict)
+    objective_status: dict = Field(default_factory=dict)
+    objectives: list[str] = Field(default_factory=list)
+    template_id: str | None = None
+    template_version: int | None = None
+    template_snapshot: dict | None = None
+    appointments_enabled: bool
     id: uuid.UUID
     client_id: uuid.UUID
     provider: str
@@ -304,6 +364,8 @@ class ConversationCreate(BaseModel):
 
 
 class ConversationOut(ORMModel):
+    lead_profile: dict = Field(default_factory=dict)
+    lead_temperature: str | None = None
     id: uuid.UUID
     client_id: uuid.UUID
     agent_id: uuid.UUID

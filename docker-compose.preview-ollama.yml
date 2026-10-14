@@ -1,0 +1,16 @@
+# Opt-in local inference for the disposable preview only. Never use with the main stack.
+services:
+  api-preview:
+    environment:
+      OLLAMA_BASE_URL: http://ollama-preview:11434
+      OLLAMA_ALLOWED_PRIVATE_ORIGINS: '["http://ollama-preview:11434"]'
+    depends_on:
+      ollama-preview:
+        condition: service_started
+  ollama-preview:
+    profiles: [preview]
+    image: caddy:2-alpine
+    networks: [verification, preview-edge]
+    volumes:
+      - ./docker/Caddyfile.ollama-preview:/etc/caddy/Caddyfile:ro
+    tmpfs: [/data, /config]

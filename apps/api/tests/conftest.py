@@ -1,16 +1,41 @@
 import os
+import tempfile
+
+from database_safety import is_disposable_test_target
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ["DATABASE_URL"] = os.getenv(
-    "TEST_DATABASE_URL",
-    "postgresql+psycopg://openlivery:openlivery@localhost:5432/openlivery_test",
+# Validate before importing the app or connecting: fixtures reset every table.
+_test_url = os.environ.get("TEST_DATABASE_URL", "")
+_safe = is_disposable_test_target(_test_url, os.environ.get("TKILA_TEST_ALLOW_RESET"))
+if not _safe:
+    raise pytest.UsageError(
+        "Refusing table resets: use make verify-api, or explicitly set "
+        "TEST_DATABASE_URL to a disposable local PostgreSQL database ending in "
+        "_test and TKILA_TEST_ALLOW_RESET=1. URL query overrides are forbidden."
+    )
+
+# Tests must never inherit private dotenv files, credentials or storage paths.
+from app.config import Settings  # noqa: E402
+
+Settings.model_config["env_file"] = None
+for _field in Settings.model_fields:
+    for _key in list(os.environ):
+        if _key.lower() == _field.lower():
+            del os.environ[_key]
+_test_storage = tempfile.TemporaryDirectory(prefix="tkila-test-storage-")
+os.environ.update(
+    DATABASE_URL=_test_url,
+    STORAGE_DIR=_test_storage.name,
+    RATE_LIMIT_ENABLED="false",
+    SOCIAL_WORKER_ENABLED="false",
+    AUTOMATION_WORKER_ENABLED="false",
+    CALENDAR_WORKER_ENABLED="false",
+    AUTO_RESOLVE_AFTER_HOURS="0",
 )
-os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
-os.environ.setdefault("SOCIAL_WORKER_ENABLED", "false")
 
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402

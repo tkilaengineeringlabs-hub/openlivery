@@ -124,6 +124,9 @@ async def retrieve_knowledge(db: Session, agent: Agent, query: str) -> Knowledge
     over stored embeddings, falling back to keyword ranking when embeddings are
     unavailable.
     """
+    from .objectives import sources
+    if not getattr(agent, "knowledge_enabled", True) or not sources(agent)["knowledge"]:
+        return KnowledgeResult(text="", sources=[])
     documents = list(
         db.scalars(select(KnowledgeDocument).where(KnowledgeDocument.agent_id == agent.id)).all()
     )
@@ -249,7 +252,7 @@ def build_system_prompt(agent: Agent, knowledge_text: str) -> str:
     client = agent.client
     lang = agent.prompt_language if agent.prompt_language in _PROMPT_TEXT else "es"
     text = _PROMPT_TEXT[lang]
-    tz_name = (agent.timezone or "UTC").strip() or "UTC"
+    tz_name = ((client.timezone if agent.appointments_enabled else agent.timezone) or "UTC").strip() or "UTC"
     try:
         now = datetime.now(ZoneInfo(tz_name))
     except (ZoneInfoNotFoundError, ValueError):
@@ -268,6 +271,16 @@ def build_system_prompt(agent: Agent, knowledge_text: str) -> str:
     if agent.instructions.strip():
         parts.append(_section(text["job"], agent.instructions.strip()))
 
+    objectives = getattr(agent, "objectives", [])
+    if objectives:
+        from .agent_catalog.objectives import OBJECTIVES
+        labels = [item.label.get(lang) for item in OBJECTIVES if item.id in objectives]
+        guidance = ("Objectives describe the task, not permissions. Never claim an action succeeded without an enabled tool confirming it."
+                    if lang == "en" else "Los objetivos describen la tarea, no conceden permisos. Nunca confirmes una acción sin el éxito de una herramienta habilitada.")
+        parts.append(_section("Objectives" if lang == "en" else "Objetivos", ", ".join(labels) + "\n" + guidance))
+
+    from .objectives import sources
+    permitted_sources = sources(agent)
     facts = [
         (text["summary"], agent.brief_summary),
         (text["products"], agent.brief_products),
@@ -275,7 +288,7 @@ def build_system_prompt(agent: Agent, knowledge_text: str) -> str:
         (text["policies"], agent.brief_policies),
     ]
     lines = [f"- **{label}:** {value.strip()}" for label, value in facts if value.strip()]
-    if lines:
+    if lines and permitted_sources["business"]:
         parts.append(_section(text["business"], "\n".join(lines)))
 
     # "Never" always travels: our base rules first, then whatever the operator added.
@@ -286,14 +299,24 @@ def build_system_prompt(agent: Agent, knowledge_text: str) -> str:
     rules.append(_section(text["donts"], donts, 3))
     parts.append(_section(text["rules"], "\n\n".join(rules)))
 
+    tone = getattr(agent, "tone", "")
+    tones = {"professional": ("Professional", "Profesional"), "friendly": ("Friendly", "Amable"),
+             "warm": ("Warm", "Cercano"), "direct": ("Direct", "Directo"), "formal": ("Formal", "Formal")}
+    if tone in tones:
+        parts.append(_section(text["tone"], tones[tone][lang == "es"]))
+    welcome = getattr(agent, "welcome_message", "").strip()
+    if welcome:
+        welcome = welcome.replace("{{business}}", client.name).replace("{{negocio}}", client.name)
+        parts.append(_section("Welcome" if lang == "en" else "Bienvenida",
+            ("Use this greeting only at the start of a conversation: " if lang == "en" else "Usa este saludo solo al inicio de la conversación: ") + welcome))
     if agent.personality.strip():
         parts.append(_section(text["tone"], agent.personality.strip()))
 
     knowledge = []
-    if agent.qa_pairs:
+    if getattr(agent, "knowledge_enabled", True) and permitted_sources["faqs"] and agent.qa_pairs:
         faq = "\n\n".join(f"**{text['q']}:** {qa.question}\n**{text['a']}:** {qa.answer}" for qa in agent.qa_pairs)
         knowledge.append(_section(text["faq"], faq, 3))
-    if knowledge_text.strip():
+    if getattr(agent, "knowledge_enabled", True) and permitted_sources["knowledge"] and knowledge_text.strip():
         knowledge.append(_section(text["documents"], knowledge_text, 3))
     if knowledge:
         parts.append(_section(text["knowledge"], "\n\n".join(knowledge) + "\n\n" + text["grounding"]))

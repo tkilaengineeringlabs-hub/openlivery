@@ -14,3 +14,6 @@ mcp==1.28.1
 dnspython==2.7.0
 email-validator==2.2.0
 pytest==8.4.1
+
+# Runtime validation of provider-normalized tool arguments.
+jsonschema==4.26.0

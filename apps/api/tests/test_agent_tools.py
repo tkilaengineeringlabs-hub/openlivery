@@ -227,7 +227,7 @@ class _FakeToolEndpoint:
 
 
 def _allow_all_urls(monkeypatch):
-    monkeypatch.setattr(http_exec_module, "_blocked_reason", lambda _url: None)
+    monkeypatch.setattr(http_exec_module, "_blocked_reason", lambda _url, **_kwargs: None)
 
 
 def _patch_httpx(monkeypatch, module, client_factory):

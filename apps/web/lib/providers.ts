@@ -49,6 +49,8 @@ export const PROVIDERS = [
       { id: "claude-opus-4-8", label: "Claude Opus 4.8", group: "capable" },
     ] as const satisfies readonly ModelOption[],
   },
+  { id: "groq", label: "Groq", keyPlaceholder: "gsk_...", keyUrl: "https://console.groq.com/keys", models: [] as readonly ModelOption[] },
+  { id: "ollama", label: "Ollama", keyPlaceholder: "", keyUrl: "", models: [] as readonly ModelOption[] },
 ] as const;
 
 export type ProviderId = (typeof PROVIDERS)[number]["id"];

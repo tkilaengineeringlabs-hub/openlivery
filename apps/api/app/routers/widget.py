@@ -23,6 +23,7 @@ from ..services.attachments import (
     store_attachment,
 )
 from ..services.tools import run_completion
+from ..services.tools.registry import validate_runtime_scope
 from ..services.knowledge import build_system_prompt, retrieve_knowledge
 from ..services.providers import resolve_agent_credentials
 from ..services.usage import record_usage
@@ -263,6 +264,7 @@ def widget_attachment(public_id: str, attachment_id: uuid.UUID, session_id: str,
 async def _widget_ai_reply(db: Session, agent: Agent, conversation: Conversation, query: str) -> str | None:
     """Generate and store the AI reply for a widget conversation; None when the
     agent is not ready or the completion fails."""
+    validate_runtime_scope(agent, conversation)
     if conversation.mode == "human":
         return None
     credentials = resolve_agent_credentials(db, agent)
@@ -285,7 +287,7 @@ async def _widget_ai_reply(db: Session, agent: Agent, conversation: Conversation
     try:
         completion = await run_completion(
             db, agent, base_url, api_key, messages,
-            temperature=agent.temperature, max_tokens=agent.max_tokens,
+            temperature=agent.temperature, max_tokens=agent.max_tokens, conversation=conversation,
         )
     except HTTPException:
         return None
@@ -314,7 +316,7 @@ async def widget_message(public_id: str, payload: WidgetMessageIn, db: Session =
         await notify_needs_human(db, conversation, content)
         return {"mode": "human", "status": conversation.status, "conversation_id": conversation.id, "reply": None, "messages": []}
     reply = await _widget_ai_reply(db, agent, conversation, content)
-    return {"mode": "ai", "status": conversation.status, "conversation_id": conversation.id, "reply": reply, "reply_at": now_utc() if reply else None, "messages": []}
+    return {"mode": conversation.mode, "status": conversation.status, "conversation_id": conversation.id, "reply": reply, "reply_at": now_utc() if reply else None, "messages": []}
 
 
 @router.post("/{public_id}/media", response_model=WidgetReply, dependencies=[Depends(widget_rate_limit)])
@@ -380,4 +382,4 @@ async def widget_media(
     reply = None if mode == "human" else await _widget_ai_reply(db, agent, conversation, llm_content)
     # Return the refreshed history so the client can render the new attachment.
     history = _session_messages(db, channel, session_id, conversation_id=conversation.id)
-    return {"mode": mode, "status": conversation.status, "conversation_id": conversation.id, "reply": reply, "messages": [_message_out(item) for item in history]}
+    return {"mode": conversation.mode, "status": conversation.status, "conversation_id": conversation.id, "reply": reply, "messages": [_message_out(item) for item in history]}

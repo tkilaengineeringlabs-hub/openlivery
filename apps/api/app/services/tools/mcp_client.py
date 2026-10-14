@@ -9,6 +9,7 @@ list_tools call.
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 import httpx
 from httpx_sse import SSEError
@@ -24,15 +25,38 @@ CONNECT_TIMEOUT_SECONDS = 20
 CALL_TIMEOUT_SECONDS = 60
 
 
+def runtime_http_client_factory(url):
+    """Block redirects and server-directed SSE endpoints outside the saved origin."""
+    origin = urlsplit(url)
+    expected = (origin.scheme, origin.hostname, origin.port or (443 if origin.scheme == "https" else 80))
+
+    async def check(request):
+        destination = urlsplit(str(request.url))
+        actual = (destination.scheme, destination.hostname, destination.port or (443 if destination.scheme == "https" else 80))
+        if actual != expected or destination.username or destination.password:
+            raise httpx.HTTPError("MCP destination blocked")
+        from .http_exec import _blocked_reason
+        blocked = await asyncio.wait_for(asyncio.to_thread(_blocked_reason, str(request.url), allow_private=False), 5)
+        if blocked:
+            raise httpx.HTTPError("MCP destination blocked")
+
+    def factory(headers=None, timeout=None, auth=None):
+        return httpx.AsyncClient(headers=headers, timeout=timeout or httpx.Timeout(30), auth=auth,
+            follow_redirects=False, trust_env=False, event_hooks={"request": [check]})
+    return factory
+
+
 @asynccontextmanager
 async def open_mcp_session(url: str, transport: str, headers: dict[str, str] | None):
+    from .executor import CURRENT_EXECUTOR
+    options = {"httpx_client_factory": runtime_http_client_factory(url)} if CURRENT_EXECUTOR.get() is not None else {}
     if transport == "sse":
-        async with sse_client(url, headers=headers) as (read, write):
+        async with sse_client(url, headers=headers, **options) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
     else:
-        async with streamablehttp_client(url, headers=headers) as (read, write, _get_session_id):
+        async with streamablehttp_client(url, headers=headers, **options) as (read, write, _get_session_id):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
@@ -77,7 +101,8 @@ async def call_mcp_tool(tool: AgentTool, tool_name: str, args: dict) -> tuple[st
 
     parts = [block.text for block in result.content if getattr(block, "type", "") == "text"]
     text = "\n".join(parts).strip() or "(empty result)"
-    return text, bool(result.isError)
+    from .http_exec import redact_header_values
+    return redact_header_values(text, headers or {}), bool(result.isError)
 
 
 def _flatten_exceptions(exc: BaseException) -> list[BaseException]:

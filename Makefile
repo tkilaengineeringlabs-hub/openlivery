@@ -71,3 +71,28 @@ shell-db: ## Open psql in the database container
 
 destroy: ## DANGER: remove containers AND volumes (deletes all data)
 	$(COMPOSE) down --volumes --remove-orphans
+
+# Independent verification project: no private env or persistent DB.
+WEB_BUNDLER_FLAGS ?=
+VERIFY_COMPOSE := docker compose --env-file /dev/null -p tkila-verify -f docker-compose.verify.yml
+.PHONY: verify-web verify-api verify-api-stop
+verify-web: ## Run frontend lint, TypeScript and production build (Node >=20.9)
+	cd apps/web && npm run lint && npm run typecheck && npm run build -- $(WEB_BUNDLER_FLAGS)
+
+verify-api: ## Run backend tests in an isolated, network-restricted PostgreSQL stack
+	bash scripts/verify-api.sh
+
+verify-api-stop: ## Remove only verification containers (temporary test data is lost)
+	$(VERIFY_COMPOSE) --profile preview down
+
+.PHONY: preview-api preview-web
+PREVIEW_BUILD_FLAGS ?= --build
+preview-api: ## Start an empty offline API preview; also validates migrations on first start
+	$(VERIFY_COMPOSE) --profile preview up $(PREVIEW_BUILD_FLAGS) --wait --wait-timeout 300 -d db-preview api-preview preview-gateway
+
+preview-web: ## Start local web on port 13000 against the isolated preview API
+	cd apps/web && NEXT_PUBLIC_API_URL=http://localhost:18000 BACKEND_INTERNAL_URL=http://localhost:18000 npm run dev -- $(WEB_BUNDLER_FLAGS) --hostname 127.0.0.1 --port 13000
+
+.PHONY: preview-api-ollama
+preview-api-ollama: ## Start disposable preview with access only to the host Ollama API
+	$(VERIFY_COMPOSE) -f docker-compose.preview-ollama.yml --profile preview up $(PREVIEW_BUILD_FLAGS) --wait --wait-timeout 300 -d db-preview api-preview preview-gateway ollama-preview

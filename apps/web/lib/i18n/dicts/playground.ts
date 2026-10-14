@@ -1,5 +1,6 @@
 // UI strings for the "playground" area. Fill `en` and mirror it in `es`.
 const en = {
+  activity: { show: "View agent activity", running: "Running", success: "Completed", failed: "Failed or denied", unsupported: "The selected model does not support tools.", limited: "Some agent capabilities will be unavailable with this model." },
   page: {
     eyebrow: "Lab",
     title: "Playground",
@@ -38,7 +39,7 @@ const en = {
       "This agent does not have a model configured yet. Assign a connection in its details before sending messages.",
   },
   notReady: {
-    keyPrefix: "This agent can't reply yet because it is missing your API key. Add it in ",
+    keyPrefix: "This agent needs a provider connection. Configure it in ",
     settingsLink: "Settings",
     modelPrefix: "This agent can't reply yet because it has no model. Choose one in ",
     modelLink: "the agent's setup",
@@ -57,6 +58,7 @@ const en = {
 };
 
 const es: typeof en = {
+  activity: { show: "Ver actividad del agente", running: "En ejecución", success: "Completado", failed: "Falló o fue denegado", unsupported: "El modelo seleccionado no admite herramientas.", limited: "Algunas capacidades del agente no estarán disponibles con este modelo." },
   page: {
     eyebrow: "Laboratorio",
     title: "Playground",
@@ -95,7 +97,7 @@ const es: typeof en = {
       "Este agente todavía no tiene un modelo configurado. Asígnale una conexión en sus detalles antes de enviar mensajes.",
   },
   notReady: {
-    keyPrefix: "Este agente todavía no puede responder porque le falta tu API key. Agrégala en ",
+    keyPrefix: "Este agente necesita una conexión de proveedor. Configúrala en ",
     settingsLink: "Configuración",
     modelPrefix: "Este agente todavía no puede responder porque no tiene modelo. Elige uno en ",
     modelLink: "la configuración del agente",

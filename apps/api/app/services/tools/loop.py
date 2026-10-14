@@ -9,26 +9,16 @@ them through the plain-completion text extractors until the loop ends.
 import json
 
 from ..ai import ANTHROPIC_VERSION, Completion, _post_json, extract_openai_text
-from .http_exec import execute_http_tool
-from .mcp_client import call_mcp_tool
-from .specs import ToolSpec, find_spec
+from .specs import ToolSpec
+from .executor import ToolDispatcher
 
 MAX_TOOL_ITERATIONS = 5
 RESULT_PREVIEW_CHARS = 500
 
 
 async def _execute(spec: ToolSpec, args: dict) -> tuple[str, bool]:
-    if spec.handler is not None:
-        return spec.handler(args)
-    if spec.mcp_tool_name is not None:
-        result, is_error = await call_mcp_tool(spec.tool, spec.mcp_tool_name, args)
-    else:
-        result, is_error = await execute_http_tool(spec.tool, args)
-    if is_error:
-        # Unambiguous failure marker for both providers (the OpenAI item shape
-        # has no error flag) so the no-fallback rule in the system prompt kicks in.
-        result = f"Tool call failed: {result}"
-    return result, is_error
+    from .executor import invoke
+    return await invoke(spec, args)
 
 
 def _record(metadata: list[dict], name: str, args: dict, result: str, is_error: bool) -> None:
@@ -47,7 +37,8 @@ async def anthropic_tool_loop(
     tools = [{"name": s.name, "description": s.description, "input_schema": s.input_schema} for s in specs]
     sampling: dict = {} if temperature is None else {"temperature": temperature}
     input_tokens = output_tokens = 0
-    metadata: list[dict] = []
+    dispatcher = ToolDispatcher(specs, "anthropic")
+    metadata = dispatcher.metadata
 
     for iteration in range(MAX_TOOL_ITERATIONS + 1):
         payload: dict = {"model": model, "messages": convo, "max_tokens": max_tokens or 2048, "tools": tools}
@@ -71,13 +62,8 @@ async def anthropic_tool_loop(
         convo.append({"role": "assistant", "content": content})
         results = []
         for block in tool_uses:
-            spec = find_spec(specs, block.get("name", ""))
-            args = block.get("input") or {}
-            if spec is None:
-                result, is_error = f"Error: unknown tool '{block.get('name')}'", True
-            else:
-                result, is_error = await _execute(spec, args)
-            _record(metadata, block.get("name", ""), args, result, is_error)
+            args = block.get("input", {})
+            result, is_error = await dispatcher.call(block.get("name", ""), args)
             results.append({"type": "tool_result", "tool_use_id": block.get("id"), "content": result, "is_error": is_error})
         convo.append({"role": "user", "content": results})
     raise ValueError("tool loop did not converge")
@@ -99,7 +85,8 @@ async def openai_tool_loop(
     if max_tokens is not None:
         sampling["max_output_tokens"] = max_tokens
     input_tokens = output_tokens = 0
-    metadata: list[dict] = []
+    dispatcher = ToolDispatcher(specs, "openai")
+    metadata = dispatcher.metadata
 
     for iteration in range(MAX_TOOL_ITERATIONS + 1):
         payload: dict = {"model": model, "input": input_items, "tools": tools}
@@ -121,12 +108,7 @@ async def openai_tool_loop(
             try:
                 args = json.loads(call.get("arguments") or "{}")
             except ValueError:
-                args = {}
-            spec = find_spec(specs, call.get("name", ""))
-            if spec is None:
-                result, is_error = f"Error: unknown tool '{call.get('name')}'", True
-            else:
-                result, is_error = await _execute(spec, args)
-            _record(metadata, call.get("name", ""), args, result, is_error)
+                args = None
+            result, is_error = await dispatcher.call(call.get("name", ""), args)
             input_items.append({"type": "function_call_output", "call_id": call.get("call_id"), "output": result})
     raise ValueError("tool loop did not converge")

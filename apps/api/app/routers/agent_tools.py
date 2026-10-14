@@ -53,7 +53,7 @@ async def _discover_or_502(url: str, transport: str, headers: dict[str, str] | N
     except Exception as exc:
         # Exception reprs carry no header values, so this is safe to log.
         causes = "; ".join(f"{type(c).__name__}: {c}" for c in _flatten_exceptions(exc))
-        logger.warning("MCP discovery failed url=%s transport=%s causes=[%s]", url, transport, causes[:500])
+        logger.warning("MCP discovery failed transport=%s causes=[%s]", transport, causes[:500])
         raise HTTPException(
             status_code=502,
             detail=f"Could not connect to the MCP server: {describe_mcp_error(exc)}.",

@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +32,14 @@ class Settings(BaseSettings):
     # addresses are rejected. Enable only on self-hosted deployments that need
     # tools to reach internal services.
     tools_allow_private_urls: bool = False
+    groq_api_key: str = ""
+    ollama_base_url: str = ""
+    ollama_timeout_seconds: float = Field(default=180, ge=5, le=600)
+    # Exact deployment-approved origins; never a blanket private-network bypass.
+    ollama_allowed_private_origins: list[str] = [
+        "http://localhost:11434", "http://127.0.0.1:11434",
+        "http://[::1]:11434", "http://host.docker.internal:11434",
+    ]
     storage_dir: Path = APP_DIR / "storage"
     backend_url: str = "http://localhost:8000"
     whatsapp_bridge_url: str = "http://localhost:3101"
@@ -40,6 +49,11 @@ class Settings(BaseSettings):
     meta_graph_base_url: str = "https://graph.facebook.com/v23.0"
     # Official messaging APIs. App credentials remain on the server.
     social_graph_version: str = "v25.0"
+    google_calendar_client_id: str = ""
+    google_calendar_client_secret: str = ""
+    google_calendar_redirect_uri: str = "http://localhost:8000/api/appointment-calendars/google/callback"
+    calendar_worker_enabled: bool = True
+    automation_worker_enabled: bool = True
     social_worker_enabled: bool = True
     social_worker_interval_seconds: float = 2.0
     instagram_app_id: str = ""

@@ -10,6 +10,9 @@ from .database import new_session
 from .services.conversation_state import resolve_idle_ai_conversations
 from .routers import (
     agency,
+    automations,
+    appointments,
+    appointment_calendars,
     agent_tools,
     agents,
     auth,
@@ -55,11 +58,27 @@ async def _auto_resolve_loop() -> None:
 async def lifespan(_: FastAPI):
     from .services.social_worker import start_worker, stop_worker
     start_worker()
+    from .services.automations.worker import worker_loop
+    automation_worker = asyncio.create_task(worker_loop()) if settings.automation_worker_enabled else None
+    from .services.calendar_worker import worker_loop as calendar_loop
+    calendar_worker = asyncio.create_task(calendar_loop()) if settings.calendar_worker_enabled else None
     sweeper = asyncio.create_task(_auto_resolve_loop()) if settings.auto_resolve_after_hours > 0 else None
     try:
         yield
     finally:
         await stop_worker()
+        if calendar_worker:
+            calendar_worker.cancel()
+            try:
+                await calendar_worker
+            except asyncio.CancelledError:
+                pass
+        if automation_worker:
+            automation_worker.cancel()
+            try:
+                await automation_worker
+            except asyncio.CancelledError:
+                pass
         if sweeper:
             sweeper.cancel()
 
@@ -108,3 +127,11 @@ app.include_router(widget.router, prefix="/api")
 app.include_router(domains.public_router, prefix="/api")
 app.include_router(social.router, prefix="/api")
 app.include_router(social_webhook.public_router, prefix="/api")
+
+# Register transactional message events for all existing channel writers.
+from .services.automations import events as automation_events  # noqa: E402, F401
+app.include_router(automations.router, prefix="/api")
+
+app.include_router(appointments.router, prefix="/api")
+
+app.include_router(appointment_calendars.router, prefix="/api")

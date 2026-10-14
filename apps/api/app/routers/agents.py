@@ -28,7 +28,7 @@ def _agent(db: Session, user: User, agent_id: uuid.UUID) -> Agent:
     )
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    return _enrich_agents(db, user, [agent])[0]
 
 
 def _validate_client(db: Session, user: User, client_id: uuid.UUID) -> None:
@@ -48,21 +48,76 @@ def _channels_of(db: Session, agent: Agent) -> list[WhatsAppChannel | WhatsAppCl
     ]
 
 
+async def _validate_ollama(db: Session, user: User, provider: str, model: str) -> None:
+    if provider not in ("ollama", "groq"):
+        return
+    from ..services.providers import resolve_provider_credentials
+    from ..services.model_providers import get_provider
+    connection = resolve_provider_credentials(db, user.agency_id, provider)
+    if not connection:
+        raise HTTPException(422, f"{provider}.not_configured")
+    if model not in await get_provider(provider).list_models(*connection):
+        raise HTTPException(422, f"{provider}.model_missing")
+
+
+def _enrich_agents(db: Session, user: User, agents: list[Agent]) -> list[Agent]:
+    from ..models import SocialChannel
+    if not agents:
+        return agents
+    by_id = {agent.id: agent for agent in agents}
+    for agent in agents:
+        from ..services.objectives import statuses
+        agent.objective_status = statuses(db, agent)
+        agent.channel_types = []
+        agent.custom_tool_names = []
+    for model, kind in ((WhatsAppChannel, "whatsapp"), (WhatsAppCloudChannel, "whatsapp_cloud"), (WidgetChannel, "widget"), (SocialChannel, None)):
+        for row in db.scalars(select(model).where(model.agency_id == user.agency_id, model.agent_id.in_(by_id))):
+            owner = by_id[row.agent_id]
+            if row.client_id == owner.client_id:
+                owner.channel_types.append(kind or row.provider)
+    # Resolve only the requested agents' own tools and explicit shared grants.
+    from sqlalchemy import or_
+    shared_ids = {uuid.UUID(str(item)) for agent in agents for item in agent.shared_tool_ids}
+    rows = db.execute(select(AgentTool, Agent.client_id).join(Agent, Agent.id == AgentTool.agent_id).where(
+        Agent.agency_id == user.agency_id, Agent.deleted_at.is_(None), AgentTool.enabled.is_(True),
+        or_(AgentTool.agent_id.in_(by_id), AgentTool.id.in_(shared_ids)))).all()
+    for tool, client_id in rows:
+        for agent in agents:
+            if client_id == agent.client_id and (tool.agent_id == agent.id or str(tool.id) in agent.shared_tool_ids):
+                agent.custom_tool_names.append(tool.name)
+    return agents
+
+
 @router.get("", response_model=list[AgentOut])
 def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    return db.scalars(
+    agents = db.scalars(
         select(Agent)
         .options(joinedload(Agent.client).selectinload(Client.agents))
         .where(Agent.agency_id == user.agency_id, Agent.deleted_at.is_(None))
         .order_by(Agent.created_at.desc())
     ).unique().all()
+    return _enrich_agents(db, user, list(agents))
 
 
 @router.post("", response_model=AgentOut, status_code=status.HTTP_201_CREATED)
-def create_agent(payload: AgentCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def create_agent(payload: AgentCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _validate_client(db, user, payload.client_id)
-    agent = Agent(agency_id=user.agency_id, **payload.model_dump())
+    await _validate_ollama(db, user, payload.provider, payload.model)
+    from ..services.agent_builder import prepare
+    values = payload.model_dump(exclude={"apply_builder", "apply_template"}, exclude_unset=payload.apply_template)
+    if "objective_config" not in payload.model_fields_set:
+        values.pop("objective_config", None)
+    if payload.apply_template:
+        values.setdefault("prompt_language", payload.prompt_language)
+    # Legacy forms keep their defaults; guided selections explicitly apply grants.
+    if not payload.apply_builder and not payload.apply_template and "selected_tools" not in payload.model_fields_set:
+        values.pop("selected_tools", None)
+    values = await prepare(db, user.agency_id, values, guided=payload.apply_builder, apply_template=payload.apply_template)
+    agent = Agent(agency_id=user.agency_id, **values)
     db.add(agent)
+    db.flush()
+    from ..services.objectives import sync_rules
+    sync_rules(db, agent)
     db.commit()
     return _agent(db, user, agent.id)
 
@@ -73,9 +128,11 @@ def get_agent(agent_id: uuid.UUID, db: Session = Depends(get_db), user: User = D
 
 
 @router.patch("/{agent_id}", response_model=AgentOut)
-def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     agent = _agent(db, user, agent_id)
-    values = payload.model_dump(exclude_unset=True)
+    values = payload.model_dump(exclude_unset=True, exclude={"apply_builder", "apply_template"})
+    if "provider" in values or "model" in values:
+        await _validate_ollama(db, user, values.get("provider", agent.provider), values.get("model", agent.model))
     client_id = values.get("client_id", agent.client_id)
     if client_id != agent.client_id and _channels_of(db, agent):
         raise HTTPException(
@@ -90,8 +147,12 @@ def update_agent(agent_id: uuid.UUID, payload: AgentUpdate, db: Session = Depend
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    from ..services.agent_builder import prepare
+    values = await prepare(db, user.agency_id, values, agent, guided=payload.apply_builder, apply_template=payload.apply_template)
     for key, value in values.items():
         setattr(agent, key, value)
+    from ..services.objectives import sync_rules
+    sync_rules(db, agent)
     db.commit()
     return _agent(db, user, agent_id)
 
@@ -114,10 +175,22 @@ def delete_agent(agent_id: uuid.UUID, db: Session = Depends(get_db), user: User 
         db.execute(delete(model).where(model.agent_id == agent.id))
     for field in ("instructions", "personality", "brief_summary", "brief_products", "brief_audience", "brief_policies", "brief_dos", "brief_donts"):
         setattr(agent, field, "")
+    agent.selected_channels = []
+    agent.selected_tools = []
+    agent.shared_tool_ids = []
+    agent.tone = ""
+    agent.welcome_message = ""
+    agent.knowledge_enabled = False
+    agent.objectives = []
+    agent.template_id = None
+    agent.template_version = None
+    agent.template_snapshot = None
     agent.escalation_team_id = None
     agent.escalation_assignee_id = None
     agent.is_active = False
     agent.deleted_at = now_utc()
+    from ..services.objectives import sync_rules
+    sync_rules(db, agent)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

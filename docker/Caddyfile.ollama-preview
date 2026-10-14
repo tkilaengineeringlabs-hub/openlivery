@@ -1,0 +1,9 @@
+:11434 {
+    @ollama_read path /api/tags /api/show /api/chat
+    handle @ollama_read {
+        reverse_proxy host.docker.internal:11434 {
+            header_up Host host.docker.internal:11434
+        }
+    }
+    respond 403
+}

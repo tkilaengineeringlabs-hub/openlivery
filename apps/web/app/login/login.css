@@ -1,0 +1,31 @@
+@layer theme, login-reset;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" source(none);
+@source "./page.tsx";
+
+/* Scope the border reset; the rest of the app does not use Preflight. */
+@layer login-reset {
+  .tkila-login *, .tkila-login ::before, .tkila-login ::after {
+    border-style: solid;
+    border-width: 0;
+  }
+}
+
+/* Keep shared form controls on the landing page's brand palette. */
+.tkila-login input:not([type="checkbox"]) {
+  background: #F8FAFC;
+  border-color: #DCE4EC;
+  color: #0F2942;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.tkila-login input::placeholder { color: #94A3B8; }
+.tkila-login input:focus {
+  outline: none;
+  border-color: #8BE800;
+  box-shadow: 0 0 0 2px rgb(139 232 0 / 12%);
+}
+.tkila-login .auth-tabs { border-color: #DCE4EC; background: #F7F9FC; }
+.tkila-login .auth-tabs button { color: #64748B; }
+.tkila-login .auth-tabs button.active { color: #0F2942; }
+.tkila-login .secret-input .reveal { color: #64748B; }
+.tkila-login .secret-input .reveal:hover { background: #F7F9FC; color: #0F2942; }

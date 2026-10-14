@@ -15,6 +15,8 @@ export type BusinessType = { code: string; label: IndustryLabel };
 export type Industry = { code: string; label: IndustryLabel; types: BusinessType[] };
 
 export type Client = {
+  timezone: string;
+  appointment_slot_minutes: number;
   id: string;
   name: string;
   industry: string;
@@ -49,6 +51,23 @@ export type ClientDomain = {
 };
 
 export type Agent = {
+  escalation_builtin_enabled: boolean;
+  channel_types: string[];
+  custom_tool_names: string[];
+  selected_channels: string[];
+  selected_tools: string[];
+  shared_tool_ids: string[];
+  tone: string;
+  welcome_message: string;
+  knowledge_enabled: boolean;
+  objectives?: string[];
+  template_id?: string | null;
+  objectives_managed?: boolean;
+  objective_config?: Record<string, Record<string, unknown>>;
+  objective_status?: Record<string, { state: string; last_run_at: string | null; last_run_status: string | null }>;
+  template_version?: number | null;
+  template_snapshot?: import("@/lib/agent-builder").AgentTemplate | null;
+  appointments_enabled: boolean;
   id: string;
   client_id: string;
   provider: string;
@@ -84,6 +103,9 @@ export type Provider = {
   label: string;
   configured: boolean;
   api_key_masked: string;
+  name?: string | null;
+  base_url?: string | null;
+  default_model?: string | null;
 };
 
 export type ProviderTest = { ok: boolean; message: string; models: string[] };
@@ -125,7 +147,7 @@ export type ToolCallMeta = { name: string; arguments: Record<string, unknown>; r
 
 export type Source = { id: string; filename: string; excerpt: string };
 export type Attachment = { id: string; kind: "image" | "audio" | "video" | "file"; mime: string; filename: string | null; size_bytes: number };
-export type Message = { id: string; role: "user" | "assistant" | "system"; kind?: "message" | "activity"; delivery_status?: "pending" | "sent" | "delivered" | "read" | "failed" | "unknown" | null; delivery_error?: string | null; activity?: { event: string; hours?: number | string; assignee?: string; from?: string; team?: string; target?: string; reason?: string } | null; content: string; sources: Source[]; tool_calls?: ToolCallMeta[] | null; sender_type: "visitor" | "ai" | "human"; sender_name: string | null; reaction?: string | null; incoming_reaction?: string | null; quoted_message_id?: string | null; created_at: string; attachments?: Attachment[] };
+export type Message = { id: string; role: "user" | "assistant" | "system"; kind?: "message" | "activity"; delivery_status?: "pending" | "sent" | "delivered" | "read" | "failed" | "unknown" | null; delivery_error?: string | null; activity?: { event: string; hours?: number | string; assignee?: string; from?: string; team?: string; target?: string; reason?: string } | null; content: string; sources: Source[]; tool_calls?: ToolCallMeta[] | null; sender_type: "visitor" | "ai" | "human" | "automation"; sender_name: string | null; reaction?: string | null; incoming_reaction?: string | null; quoted_message_id?: string | null; created_at: string; attachments?: Attachment[] };
 
 export type ConversationInbox = {
   id: string;
@@ -373,3 +395,5 @@ export type SocialHistoryJob = {
   created_at: string;
   updated_at: string;
 };
+
+export type ToolExecution = { id: string; tool_name: string; status: "started" | "succeeded" | "failed" | "denied"; arguments: Record<string, unknown>; result_summary: string; latency_ms: number; created_at: string; finished_at: string | null; provider: string; model: string };

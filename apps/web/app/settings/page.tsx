@@ -1,7 +1,9 @@
 "use client";
+import { GroqSettings } from "@/components/groq-settings";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { CheckCircle2, Eye, EyeOff, ImagePlus, LoaderCircle, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { OllamaSettings } from "@/components/ollama-settings";
 import { PageHead } from "@/components/ui";
 import { FormSkeleton } from "@/components/skeleton";
 import { useToast } from "@/components/toast";
@@ -63,9 +65,11 @@ export default function SettingsPage() {
 
     <section className="section-block"><div className="section-heading"><div><h2>{t("settings.providers.heading")}</h2><p>{t("settings.providers.copy")}</p></div></div>
       <div className="security-note"><ShieldCheck size={20} /><span><strong>{t("settings.index.privateCredentials")}</strong> {t("settings.index.privateCredentialsCopy")}</span></div>
-      {PROVIDERS.map((preset) => (
+      {PROVIDERS.filter((preset) => preset.id !== "ollama" && preset.id !== "groq").map((preset) => (
         <ProviderKeyCard key={preset.id} preset={preset} state={providers.find((x) => x.provider === preset.id)} busy={busy} onSave={saveKey} onRemove={removeKey} t={t} />
       ))}
+      <GroqSettings key={JSON.stringify(providers.find((p) => p.provider === "groq"))} state={providers.find((p) => p.provider === "groq")} onSaved={load} />
+      <OllamaSettings key={JSON.stringify(providers.find((p) => p.provider === "ollama"))} state={providers.find((p) => p.provider === "ollama")} onSaved={load} />
     </section>
   </div>;
 }

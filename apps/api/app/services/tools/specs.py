@@ -7,7 +7,7 @@ consecutive underscores, so the "__" separator is unambiguous.
 
 import re
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Awaitable
 
 from ...models import AgentTool
 
@@ -24,9 +24,10 @@ class ToolSpec:
     tool: AgentTool | None = None      # backing row; None for built-in tools
     mcp_tool_name: str | None = None  # unprefixed name on the MCP server
     # Built-in tools run in-process: the handler takes the arguments and
-    # returns (result_text, is_error). It must not do I/O; side effects are
-    # recorded and applied by the caller after the loop finishes.
-    handler: Callable[[dict], tuple[str, bool]] | None = None
+    # returns (result_text, is_error). Escalation records deferred effects;
+    # booking handlers commit their own scoped transaction before confirming.
+    handler: Callable[[dict], tuple[str, bool] | Awaitable[tuple[str, bool]]] | None = None
+    permission_source: str = "enabled_agent_tool"
 
 
 def path_placeholders(url: str) -> list[str]:
@@ -49,7 +50,7 @@ def _http_input_schema(tool: AgentTool) -> dict:
         properties[name] = prop
         if param.get("required"):
             required.append(name)
-    schema: dict = {"type": "object", "properties": properties}
+    schema: dict = {"type": "object", "properties": properties, "additionalProperties": False}
     if required:
         schema["required"] = required
     return schema

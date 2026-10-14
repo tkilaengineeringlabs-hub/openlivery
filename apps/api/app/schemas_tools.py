@@ -22,8 +22,9 @@ def _validate_url(value: str) -> str:
     # trimmed value so a URL pasted with spaces still works.
     value = value.strip()
     parsed = urlparse(value)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("URL must start with http:// or https://")
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password
+            or "{" in parsed.netloc or "}" in parsed.netloc):
+        raise ValueError("Use an HTTP or HTTPS URL with a fixed hostname and no embedded credentials")
     return value
 
 
